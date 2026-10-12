@@ -140,7 +140,7 @@ contrast_text() {
 # Texte à contraste modéré (contrast_text), gris moyen sur la piste.
 gauge_dual() {
     local q="$1" t="$2" cells="$3" main="$4" text="${5:-}" max=$(( $3 * 8 ))
-    local mid r g b lo hi i s e left right k out="" len=${#5} start=-1 cand c cost best
+    local mid r g b lo hi i s e left right out="" len=${#5} start=-1 cand c cost best
     local BLOCKS=(' ' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
     local -a K=()
     (( q < 0 )) && q=0; (( q > max )) && q=$max
@@ -225,7 +225,7 @@ TRACK_TEXT=$'\033[38;5;241m'  # texte sur la piste : gris moyen, contraste ~3,4:
 gauge_label() {
     local n="$1" cells="$2" text="$3" fill_fg="$4" fill_bg="$5" fill_text="$6"
     local len=${#text} full part start i out=""
-    local BLOCKS=(' ' '▏' '▎' '▍' '▌' '▋' '▊' '▉' '█')
+    local BLOCKS=(' ' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
     [ "$n" -lt 0 ] && n=0
     [ "$n" -gt $(( cells * 8 )) ] && n=$(( cells * 8 ))
     full=$(( n / 8 )); part=$(( n % 8 ))
@@ -435,7 +435,7 @@ window_block() {
         window_eighths="$eighths"
     fi
 
-    # --- Couleur du % = RYTHME de consommation, pas valeur absolue ---
+    # --- Couleur de la jauge = RYTHME de consommation, pas valeur absolue ---
     # On compare le quota consommé au temps écoulé dans la fenêtre.
     # Être à 90% de quota à 90% du temps (ratio ~1) est sain ; être à 80%
     # à 20% du temps (ratio 4) est alarmant. La projection = quota extrapolé
@@ -445,7 +445,7 @@ window_block() {
     #      on la calcule comme si au moins 1h était écoulée. C'est continu (pas de
     #      seuil sur Q) et une vraie rafale reste signalée (24 % en 15 min -> 120).
     # 7d : pas de durée minimale.
-    if [ -n "$window_elapsed_pct" ] && [ "$window_elapsed_pct" -gt 0 ]; then
+    if [ -n "$window_elapsed_pct" ]; then   # toujours ≥ 1 : pas de division par zéro
         local t_eff="$window_elapsed_pct"
         [ "$kind" != 7d ] && (( t_eff < 20 )) && t_eff=20
         proj=$(( window_pct * 100 / t_eff ))   # quota projeté fin de fenêtre
@@ -456,7 +456,7 @@ window_block() {
     # --- Niveau de PROJECTION (quota à fin de fenêtre) : palette H à 9 niveaux ---
     # proj = Q% * 100 / T% : « Q% à 80 % de T% » <=> proj = 80.
     # Le niveau colore le remplissage de la jauge et choisit, en 5h, la flèche
-    # posée sur la jauge (↓ on finira large / → à l'équilibre / ↑ on tape le mur avant reset).
+    # placée juste après elle (↓ on finira large / → à l'équilibre / ↑ on tape le mur avant reset).
     # 7d : couleur seule, sans flèche.
     local lv=0 t
     for t in "${QUOTA_THRESHOLDS[@]}"; do
