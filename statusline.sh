@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
-# Claude Code status line script
-# Single line: CWD, model + effort, context gauge, 5h window, version
+# Claude Code status line, sur une seule ligne :
+#   dossier courant | modèle effort jauge de contexte | ❺ quota 5h ❼ quota hebdo | coût | version
+#
+# Prérequis : bash ≥ 5, jq, coreutils GNU (date -d, stat -c) ; npm (facultatif,
+# pour signaler une version plus récente de Claude Code).
+#
+# Réglages facultatifs (variables d'environnement) :
+#   CLAUDE_STATUSLINE_PROJECTS_DIRS  dossiers de projets séparés par « : », affichés
+#                                    sous forme d'icône suivie du chemin relatif
+#   CLAUDE_STATUSLINE_PROJECTS_ICON  icône de ces dossiers (défaut 🛠️)
+#   CLAUDE_STATUSLINE_THEME          light | dark : couleurs de l'effort (défaut :
+#                                    réglage clair/sombre de GNOME, sinon light)
 
 input=$(cat)
 
@@ -22,16 +32,19 @@ ctx_tokens=$(echo "$input" | jq -r '.context_window | .total_input_tokens
     | floor')
 cur_ver=$(echo "$input" | jq -r '.version // empty')
 
-# --- CWD display (aligned with shell prompt) ---
-if [[ "$cwd" == "/storage/projets" || "$cwd" == "$HOME/projets" ]]; then
-    cwd_short="🛠️ /"
-elif [[ "$cwd" == /storage/projets/* ]]; then
-    cwd_short="🛠️  ${cwd#/storage/projets/}"
-elif [[ "$cwd" == $HOME/projets/* ]]; then
-    cwd_short="🛠️  ${cwd#$HOME/projets/}"
-else
-    cwd_short="${cwd/#$HOME/\~}"
-fi
+# --- Dossier courant : ~ pour le home, icône pour les dossiers de projets ---
+cwd_short="${cwd/#$HOME/\~}"
+PROJECTS_ICON="${CLAUDE_STATUSLINE_PROJECTS_ICON:-🛠️}"
+IFS=':' read -ra projects_dirs <<<"${CLAUDE_STATUSLINE_PROJECTS_DIRS:-}"
+for d in "${projects_dirs[@]}"; do
+    d="${d%/}"
+    [ -n "$d" ] || continue
+    if [[ "$cwd" == "$d" ]]; then
+        cwd_short="$PROJECTS_ICON /"; break
+    elif [[ "$cwd" == "$d"/* ]]; then
+        cwd_short="$PROJECTS_ICON  ${cwd#"$d"/}"; break
+    fi
+done
 
 # --- ANSI codes ---
 RESET=$'\033[0m'
@@ -49,10 +62,10 @@ BLUE=$'\033[34m'
 QUOTA_COLORS=(     "30;142;62" "76;175;80" "139;195;74" "240;200;0" "255;160;0" "255;109;0" "229;57;53" "194;24;91" "123;31;162")
 QUOTA_GLYPHS=(     "↓"         "↓"         "↘"          "↘"         "↘"         "→"        "↗"         "↑"         "↟")
 QUOTA_THRESHOLDS=( 75          81          86           91          95          100        105         110)
-# Jauge de contexte : même palette, seuils en MILLIERS DE TOKENS (répartition
-# « C2 » choisie par bma) selon les repères de ~/projets/claude-cost/RECOMMANDATIONS.md :
-# /compact dès 150-200K (orange 175-200K), les tours > 200K font 77 % du coût
-# (rouge au-delà), un tour > 400K coûte ~3 fois un tour à 100-200K (violet au-delà).
+# Jauge de contexte : même palette, seuils en MILLIERS DE TOKENS, calés sur le
+# coût des tours : /compact conseillé dès 150-200K (orange 175-200K), les tours
+# > 200K pèsent l'essentiel du coût (rouge au-delà), un tour > 400K coûte ~3 fois
+# un tour à 100-200K (violet au-delà).
 CTX_THRESHOLDS=(   60          90          120          150         175         200        300         400)
 TRACK=$'\033[48;5;250m'           # fond gris clair = piste des jauges
 TRACK_RGB="188;188;188"           # même gris (250) en RGB
@@ -210,12 +223,17 @@ gauge_label() {
 # low=warning, medium=success, high=permission, xhigh=autoAccept (thèmes light
 # et dark de Claude Code), max=arc-en-ciel (animé dans Claude Code, figé ici).
 # Le thème `auto` suit le fond du terminal, que ce script (sans TTY) ne peut pas
-# interroger : le réglage clair/sombre de GNOME sert d'indice.
+# interroger : à défaut de CLAUDE_STATUSLINE_THEME, le réglage clair/sombre de
+# GNOME sert d'indice.
 rgb() { printf '\033[1;38;2;%sm' "$1"; }  # gras + couleur 24 bits, $1 = "r;g;b"
 
 effort_display=""
 if [ -n "$effort" ]; then
-    if [ "$(gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null)" = "'prefer-dark'" ]; then
+    theme="${CLAUDE_STATUSLINE_THEME:-}"
+    if [ -z "$theme" ] && [ "$(gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null)" = "'prefer-dark'" ]; then
+        theme=dark
+    fi
+    if [ "$theme" = dark ]; then
         EFF_LOW="255;193;7";  EFF_MEDIUM="78;186;101"; EFF_HIGH="177;185;249"; EFF_XHIGH="175;135;255"
     else
         EFF_LOW="150;108;30"; EFF_MEDIUM="44;122;57";  EFF_HIGH="87;105;247";  EFF_XHIGH="135;0;255"
