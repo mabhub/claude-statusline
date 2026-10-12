@@ -39,7 +39,8 @@ ctx_tokens=$(echo "$input" | jq -r '.context_window | .total_input_tokens
 cur_ver=$(echo "$input" | jq -r '.version // empty')
 
 # --- Dossier courant : ~ pour le home, icône pour les dossiers de projets ---
-cwd_short="${cwd/#$HOME/\~}"
+cwd_short="$cwd"
+[[ "$cwd" == "$HOME" || "$cwd" == "$HOME"/* ]] && cwd_short="~${cwd#"$HOME"}"
 PROJECTS_ICON="${CLAUDE_STATUSLINE_PROJECTS_ICON:-🛠️}"
 IFS=':' read -ra projects_dirs <<<"${CLAUDE_STATUSLINE_PROJECTS_DIRS:-}"
 for d in "${projects_dirs[@]}"; do
