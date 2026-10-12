@@ -369,7 +369,10 @@ changelog_link() {
 
 if [ -n "$cur_ver" ]; then
     cur_link=$(changelog_link "$cur_ver")
-    if [ -n "$latest_ver" ] && [ "$cur_ver" != "$latest_ver" ]; then
+    # Seulement vers une version PLUS RÉCENTE : juste après une mise à jour, le
+    # cache (1 h) peut encore annoncer l'ancienne.
+    if [ -n "$latest_ver" ] && [ "$cur_ver" != "$latest_ver" ] \
+        && [ "$(printf '%s\n' "$cur_ver" "$latest_ver" | sort -V | tail -n 1)" = "$latest_ver" ]; then
         latest_link=$(changelog_link "$latest_ver")
         version_display="${LIGHT}v${RESET}${LIGHT_YELLOW}${cur_link}${RESET}${LIGHT}→ ${latest_link}${RESET}"
     else
