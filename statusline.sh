@@ -341,10 +341,19 @@ cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
 # Dans le cache de l'utilisateur, pas dans /tmp où un autre compte pourrait créer
 # le fichier à l'avance.
 VER_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/latest-version"
+# Registre injoignable : npm peut attendre plusieurs minutes. La requête part donc
+# en arrière-plan (le résultat sert au rafraîchissement suivant), et la tentative
+# est marquée d'avance (touch) : réussie ou non, la suivante a lieu dans une heure.
 if [ ! -f "$VER_CACHE" ] || [ $(( $(date +%s) - $(stat -c %Y "$VER_CACHE" 2>/dev/null || echo 0) )) -gt 3600 ]; then
-    if mkdir -p "${VER_CACHE%/*}" 2>/dev/null && ver_tmp=$(mktemp "$VER_CACHE.XXXXXX" 2>/dev/null); then
-        npm view @anthropic-ai/claude-code version 2>/dev/null >"$ver_tmp" \
-            && mv -f "$ver_tmp" "$VER_CACHE" || rm -f "$ver_tmp"
+    if mkdir -p "${VER_CACHE%/*}" 2>/dev/null && touch "$VER_CACHE" 2>/dev/null; then
+        (
+            ver_tmp=$(mktemp "$VER_CACHE.XXXXXX") || exit
+            if timeout 30 npm view @anthropic-ai/claude-code version >"$ver_tmp"; then
+                mv -f "$ver_tmp" "$VER_CACHE"
+            else
+                rm -f "$ver_tmp"
+            fi
+        ) </dev/null >/dev/null 2>&1 &
     fi
 fi
 latest_ver=""
