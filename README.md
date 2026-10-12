@@ -119,10 +119,15 @@ Elles peuvent aussi être exportées dans le shell qui lance `claude`.
 
 ## Fichiers créés
 
-- `~/.cache/claude-statusline/rate-limits` (ou sous `$XDG_CACHE_HOME`) → dernier
-  relevé des quotas, partagé entre sessions. Chaque session ne reçoit les quotas
-  qu'à ses propres réponses API, le fichier évite qu'une session inactive
-  affiche un quota figé pendant qu'une autre consomme.
+- `~/.cache/claude-statusline/rate-limits-<compte>` (ou sous `$XDG_CACHE_HOME`)
+  → dernier relevé des quotas, partagé entre les sessions d'un même compte.
+  Chaque session ne reçoit les quotas qu'à ses propres réponses API, le fichier
+  évite qu'une session inactive affiche un quota figé pendant qu'une autre
+  consomme. Un fichier par compte, pour ne pas mélanger les quotas de deux
+  profils (`CLAUDE_CONFIG_DIR`) ; `rate-limits` tout court quand le profil n'a
+  pas de connexion claude.ai. Celui laissé par une version antérieure, commun à
+  tous les comptes, n'est plus lu dès que le compte est connu et peut être
+  supprimé.
 - `~/.cache/claude-statusline/latest-version` → dernière version publiée de
   Claude Code, mise en cache une heure.
 

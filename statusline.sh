@@ -63,6 +63,19 @@ fi
 ' <<<"$input")
 now_s=$EPOCHSECONDS
 
+# --- Compte connecté : absent du JSON, lu dans la config de Claude Code ---
+# Chaque profil (CLAUDE_CONFIG_DIR) a son propre .claude.json. Caractères de
+# contrôle retirés : ces textes finissent tels quels dans le terminal.
+{
+    IFS= read -r account_id
+    IFS= read -r account_email
+    IFS= read -r account_name
+    IFS= read -r account_org
+} < <(jq -r '
+    def clean: tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "");
+    .oauthAccount // {} | (.accountUuid // ""), (.emailAddress // ""), (.displayName // ""), (.organizationName // "") | clean
+' "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" 2>/dev/null)
+
 # --- Dossier courant : ~ pour le home, icône pour les dossiers de projets ---
 cwd_short="$cwd"
 [[ "$cwd" == "$HOME" || "$cwd" == "$HOME"/* ]] && cwd_short="~${cwd#"$HOME"}"
@@ -320,7 +333,9 @@ fi
 # le plus à jour : fenêtre la plus récente (resets_at le plus grand), et à
 # fenêtre égale le Q le plus haut (il ne fait que croître dans une fenêtre).
 # Format : une ligne « clé Q resets_at » par fenêtre.
+# Un fichier par compte : chaque compte a ses propres quotas.
 RL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/rate-limits"
+[[ "$account_id" =~ ^[0-9A-Fa-f-]+$ ]] && RL_CACHE+="-$account_id"
 declare -A RL_PCT=() RL_RESET=()
 if [ -r "$RL_CACHE" ]; then
     while read -r k p r; do
