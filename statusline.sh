@@ -21,6 +21,12 @@ case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *) export LC_ALL=C.UTF-8 ;;
 esac
 
+# Sans jq, aucun champ n'est lisible : un avertissement plutôt qu'une ligne vide.
+if ! command -v jq >/dev/null; then
+    printf '\033[33m⚠ status line : jq introuvable, à installer (paquet jq)\033[0m\n'
+    exit 0
+fi
+
 # --- Extract fields ---
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 model=$(echo "$input" | jq -r '.model.display_name // "Unknown"')

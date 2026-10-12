@@ -38,7 +38,8 @@ avec `--:--`.
 
 - Linux (coreutils GNU : `date -d`, `stat -c`)
 - bash ≥ 5
-- `jq`
+- `jq` → sans lui, la status line affiche seulement un avertissement qui invite
+  à l'installer
 - un terminal en couleurs 24 bits avec une police qui contient les blocs `▏`…`▉`
   et les indices `ₕ ₘ ⱼ`
 - `npm` (facultatif) → sert uniquement à détecter une nouvelle version de
