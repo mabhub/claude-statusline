@@ -2,7 +2,7 @@
 # Claude Code status line, sur une seule ligne :
 #   dossier courant | modèle effort jauge de contexte | ❺ quota 5h ❼ quota hebdo | coût | version
 #
-# Prérequis : bash ≥ 5, jq, coreutils GNU (date -d, stat -c) ; npm (facultatif,
+# Prérequis : bash ≥ 5, jq, coreutils GNU (stat -c, timeout) ; npm (facultatif,
 # pour signaler une version plus récente de Claude Code).
 #
 # Réglages facultatifs (variables d'environnement) :
@@ -27,16 +27,41 @@ if ! command -v jq >/dev/null; then
     exit 0
 fi
 
-# --- Extract fields ---
-cwd=$(echo "$input" | jq -r '.cwd // ""')
-model=$(echo "$input" | jq -r '.model.display_name // "Unknown"')
-effort=$(echo "$input" | jq -r '.effort.level // empty')  # absent si le modèle ne gère pas l'effort
-used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
-# Taille du contexte en tokens (dernier échange : entrée + cache), sinon déduite du %.
-ctx_tokens=$(echo "$input" | jq -r '.context_window | .total_input_tokens
-    // (if .used_percentage and .context_window_size then .used_percentage * .context_window_size / 100 else empty end)
-    | floor')
-cur_ver=$(echo "$input" | jq -r '.version // empty')
+# --- Champs du JSON fourni par Claude Code ---
+# Un seul jq (le script tourne toutes les 5 s dans chaque session), une valeur
+# par ligne : un champ absent donne une ligne vide, pas `empty`, pour que les
+# lignes suivantes restent à leur place.
+{
+    IFS= read -r cwd
+    IFS= read -r model
+    IFS= read -r effort        # absent si le modèle ne gère pas l'effort
+    IFS= read -r used_pct
+    IFS= read -r ctx_tokens    # taille du contexte (dernier échange : entrée + cache), sinon déduite du %
+    IFS= read -r cur_ver
+    IFS= read -r cost_usd      # coût de la session en tarif API (indicatif sous abonnement)
+    # Quotas 5h et hebdo : used_percentage (0-100) et resets_at (epoch s), absents
+    # tant qu'aucune réponse API n'a renseigné les limites.
+    IFS= read -r five_pct
+    IFS= read -r five_reset_s
+    IFS= read -r week_pct
+    IFS= read -r week_reset_s
+} < <(jq -r '
+    def num(f): if type == "number" then f else "" end;
+    .cwd // "",
+    .model.display_name // "Unknown",
+    .effort.level // "",
+    .context_window.used_percentage // "",
+    (.context_window | .total_input_tokens
+        // (if .used_percentage and .context_window_size then .used_percentage * .context_window_size / 100 else null end)
+        | num(floor)),
+    .version // "",
+    .cost.total_cost_usd // "",
+    (.rate_limits.five_hour.used_percentage | num(round)),
+    (.rate_limits.five_hour.resets_at | num(floor)),
+    (.rate_limits.seven_day.used_percentage | num(round)),
+    (.rate_limits.seven_day.resets_at | num(floor))
+' <<<"$input")
+now_s=$EPOCHSECONDS
 
 # --- Dossier courant : ~ pour le home, icône pour les dossiers de projets ---
 cwd_short="$cwd"
@@ -260,7 +285,7 @@ fi
 # Pas de compteur : les relances déclenchées par les messages ne cassent pas le
 # rythme (refreshInterval = 5 s). Sert aux fins de fenêtre ❺/❼ :
 # 0 = heure de fin, 1 = compte à rebours.
-ALT_PHASE=$(( EPOCHSECONDS / 5 % 2 ))
+ALT_PHASE=$(( now_s / 5 % 2 ))
 
 # --- Context percentage ---
 if [ -n "$used_pct" ]; then
@@ -287,16 +312,6 @@ if [ -n "$used_pct" ]; then
 else
     pct_display="${DIM}N/A${RESET}"
 fi
-
-# --- Quotas 5h et hebdo (tels que fournis par Claude Code dans le JSON stdin) ---
-# rate_limits.{five_hour,seven_day} : used_percentage (0-100) et resets_at
-# (epoch s). Absents tant qu'aucune réponse API n'a renseigné les limites.
-now_s=$(date +%s)
-
-five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty | round')
-five_reset_s=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty | floor')
-week_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty | round')
-week_reset_s=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty | floor')
 
 # --- Quotas partagés entre sessions ---
 # Les quotas sont communs à toutes les sessions, mais chacune ne reçoit
@@ -335,9 +350,6 @@ fi
 five_pct="${RL_PCT[five_hour]:-}"; five_reset_s="${RL_RESET[five_hour]:-}"
 week_pct="${RL_PCT[seven_day]:-}"; week_reset_s="${RL_RESET[seven_day]:-}"
 
-# --- Coût de la session en tarif API (indicatif sous abonnement) ---
-cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
-
 # --- Dernière version publiée (cache d'une heure) ---
 # Dans le cache de l'utilisateur, pas dans /tmp où un autre compte pourrait créer
 # le fichier à l'avance.
@@ -345,7 +357,7 @@ VER_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/latest-version"
 # Registre injoignable : npm peut attendre plusieurs minutes. La requête part donc
 # en arrière-plan (le résultat sert au rafraîchissement suivant), et la tentative
 # est marquée d'avance (touch) : réussie ou non, la suivante a lieu dans une heure.
-if [ ! -f "$VER_CACHE" ] || [ $(( $(date +%s) - $(stat -c %Y "$VER_CACHE" 2>/dev/null || echo 0) )) -gt 3600 ]; then
+if [ ! -f "$VER_CACHE" ] || [ $(( now_s - $(stat -c %Y "$VER_CACHE" 2>/dev/null || echo 0) )) -gt 3600 ]; then
     if mkdir -p "${VER_CACHE%/*}" 2>/dev/null && touch "$VER_CACHE" 2>/dev/null; then
         (
             ver_tmp=$(mktemp "$VER_CACHE.XXXXXX") || exit
@@ -459,26 +471,27 @@ window_block() {
     # La longueur varie (2 à 5 caractères) sans rien décaler : le texte est dans la jauge.
     local end_text=""
     if [ -n "$window_eighths" ]; then
-        local remain_s=$(( reset_s - now_s )) remain_m remain_h
+        local remain_s=$(( reset_s - now_s )) remain_m remain_h dow
         local DAYS=(Lu Ma Me Je Ve Sa Di)
         [ "$remain_s" -lt 0 ] && remain_s=0
         if [ "$kind" = 7d ]; then
             if (( ALT_PHASE == 0 )); then
-                end_text="${DAYS[$(date -d "@$reset_s" +%u) - 1]}$(date -d "@$reset_s" +%H)ₕ"
+                printf -v dow '%(%u)T' "$reset_s"
+                printf -v end_text '%s%(%H)Tₕ' "${DAYS[dow - 1]}" "$reset_s"
             else
                 remain_h=$(( (remain_s + 3599) / 3600 ))
                 if (( remain_h >= 24 )); then
-                    end_text=$(printf '%dⱼ%02dₕ' $(( remain_h / 24 )) $(( remain_h % 24 )))
+                    printf -v end_text '%dⱼ%02dₕ' $(( remain_h / 24 )) $(( remain_h % 24 ))
                 else
                     end_text="${remain_h}ₕ"
                 fi
             fi
         elif (( ALT_PHASE == 0 )); then
-            end_text=$(date -d "@$reset_s" +%H:%M)
+            printf -v end_text '%(%H:%M)T' "$reset_s"
         else
             remain_m=$(( (remain_s + 59) / 60 ))
             if (( remain_m >= 60 )); then
-                end_text=$(printf '%dₕ%02dₘ' $(( remain_m / 60 )) $(( remain_m % 60 )))
+                printf -v end_text '%dₕ%02dₘ' $(( remain_m / 60 )) $(( remain_m % 60 ))
             else
                 end_text="${remain_m}ₘ"
             fi

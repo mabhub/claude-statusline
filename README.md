@@ -36,7 +36,7 @@ avec `--:--`.
 
 ## Prérequis
 
-- Linux (coreutils GNU : `date -d`, `stat -c`)
+- Linux (coreutils GNU : `stat -c`, `timeout`)
 - bash ≥ 5
 - `jq` → sans lui, la status line affiche seulement un avertissement qui invite
   à l'installer
