@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Claude Code status line, sur une seule ligne :
-#   dossier courant | modèle effort jauge de contexte | ❺ quota 5h ❼ quota hebdo | coût | version
+# Claude Code status line, sur une seule ligne (par défaut) :
+#   dossier courant | modèle effort jauge de contexte | ❺ quota 5h ❼ quota hebdo | coût | version | compte
 #
 # Prérequis : bash ≥ 5, jq, coreutils GNU (stat -c, timeout) ; npm (facultatif,
 # pour signaler une version plus récente de Claude Code).
 #
-# Réglages facultatifs (variables d'environnement) :
+# Réglages facultatifs, par variables d'environnement ou dans le fichier
+# ${XDG_CONFIG_HOME:-~/.config}/claude-statusline/config (voir plus bas) :
+#   CLAUDE_STATUSLINE_BLOCKS        blocs affichés, dans l'ordre : dir model context
+#                                    5h 7d cost version account ; « | » place un
+#                                    séparateur, l'espace accole deux blocs (défaut :
+#                                    « dir | model context | 5h 7d | cost | version | account »)
+#   CLAUDE_STATUSLINE_ACCOUNT        email | user | org | name : forme du compte connecté
+#                                    (e-mail, sa partie avant @, organisation, nom ;
+#                                    défaut email)
 #   CLAUDE_STATUSLINE_PROJECTS_DIRS  dossiers de projets séparés par « : », affichés
 #                                    sous forme d'icône suivie du chemin relatif
 #   CLAUDE_STATUSLINE_PROJECTS_ICON  icône de ces dossiers (défaut 🛠️)
@@ -25,6 +33,26 @@ esac
 if ! command -v jq >/dev/null; then
     printf '\033[33m⚠ status line : jq introuvable, à installer (paquet jq)\033[0m\n'
     exit 0
+fi
+
+# --- Fichier de réglages (facultatif) ---
+# Une ligne « CLAUDE_STATUSLINE_…=valeur » par réglage, valeur entre guillemets
+# ou non ; les autres lignes (commentaires #, lignes vides, noms inconnus) sont
+# ignorées. Lu comme des données, jamais exécuté. Une variable d'environnement
+# définie l'emporte sur le fichier ; dans le fichier, la dernière ligne l'emporte.
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-statusline/config"
+if [ -r "$CONFIG_FILE" ]; then
+    declare -A config=()
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ ^[[:space:]]*(CLAUDE_STATUSLINE_(BLOCKS|ACCOUNT|PROJECTS_DIRS|PROJECTS_ICON|THEME))[[:space:]]*=[[:space:]]*(.*[^[:space:]])?[[:space:]]*$ ]] \
+            || continue
+        key=${BASH_REMATCH[1]} val=${BASH_REMATCH[3]}
+        [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]] && val=${BASH_REMATCH[1]}
+        config[$key]=$val
+    done < "$CONFIG_FILE"
+    for key in "${!config[@]}"; do
+        [ -n "${!key+set}" ] || printf -v "$key" '%s' "${config[$key]}"
+    done
 fi
 
 # --- Champs du JSON fourni par Claude Code ---
@@ -76,6 +104,11 @@ now_s=$EPOCHSECONDS
     .oauthAccount // {} | (.accountUuid // ""), (.emailAddress // ""), (.displayName // ""), (.organizationName // "") | clean
 ' "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" 2>/dev/null)
 
+# --- Gabarit : blocs affichés et séparateurs, dans l'ordre ---
+# « | » est un mot à part entière, même collé à ses voisins (« dir|model »).
+layout="${CLAUDE_STATUSLINE_BLOCKS:-dir | model context | 5h 7d | cost | version | account}"
+read -ra layout <<<"${layout//|/ | }"
+
 # --- Dossier courant : ~ pour le home, icône pour les dossiers de projets ---
 cwd_short="$cwd"
 [[ "$cwd" == "$HOME" || "$cwd" == "$HOME"/* ]] && cwd_short="~${cwd#"$HOME"}"
@@ -83,6 +116,7 @@ PROJECTS_ICON="${CLAUDE_STATUSLINE_PROJECTS_ICON:-🛠️}"
 IFS=':' read -ra projects_dirs <<<"${CLAUDE_STATUSLINE_PROJECTS_DIRS:-}"
 for d in "${projects_dirs[@]}"; do
     d="${d%/}"
+    d="${d/#\~/$HOME}"; d="${d/#\$HOME/$HOME}"   # ~ et $HOME écrits tels quels (fichier de réglages)
     [ -n "$d" ] || continue
     if [[ "$cwd" == "$d" ]]; then
         cwd_short="$PROJECTS_ICON /"; break
@@ -372,7 +406,8 @@ VER_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/latest-version"
 # Registre injoignable : npm peut attendre plusieurs minutes. La requête part donc
 # en arrière-plan (le résultat sert au rafraîchissement suivant), et la tentative
 # est marquée d'avance (touch) : réussie ou non, la suivante a lieu dans une heure.
-if [ ! -f "$VER_CACHE" ] || [ $(( now_s - $(stat -c %Y "$VER_CACHE" 2>/dev/null || echo 0) )) -gt 3600 ]; then
+if [[ " ${layout[*]} " == *" version "* ]] \
+    && { [ ! -f "$VER_CACHE" ] || [ $(( now_s - $(stat -c %Y "$VER_CACHE" 2>/dev/null || echo 0) )) -gt 3600 ]; }; then
     if mkdir -p "${VER_CACHE%/*}" 2>/dev/null && touch "$VER_CACHE" 2>/dev/null; then
         (
             ver_tmp=$(mktemp "$VER_CACHE.XXXXXX") || exit
@@ -524,14 +559,15 @@ window_block() {
 }
 
 # Préfixe collé à la jauge ; l'espace n'est gardée que devant « N/A ».
-window_display="${DIM}❺${RESET}"
+five_display="${DIM}❺${RESET}"
 if [ -n "$five_pct" ]; then
-    window_display+=$(window_block "$five_pct" "$five_reset_s" 5h)
+    five_display+=$(window_block "$five_pct" "$five_reset_s" 5h)
 else
-    window_display+=" ${DIM}N/A${RESET}"
+    five_display+=" ${DIM}N/A${RESET}"
 fi
+week_display=""
 if [ -n "$week_pct" ]; then
-    window_display+=" ${DIM}❼${RESET}$(window_block "$week_pct" "$week_reset_s" 7d)"
+    week_display="${DIM}❼${RESET}$(window_block "$week_pct" "$week_reset_s" 7d)"
 fi
 
 # --- Coût API ---
@@ -540,27 +576,48 @@ if [ -n "$cost_usd" ]; then
     session_display="${LIGHT}$(LC_ALL=C printf '$%.2f' "$cost_usd")${RESET}"
 fi
 
+# --- Compte connecté, sous la forme choisie (à défaut, l'e-mail) ---
+case "${CLAUDE_STATUSLINE_ACCOUNT:-email}" in
+    user) account="${account_email%%@*}" ;;
+    org)  account="${account_org:-$account_email}" ;;
+    name) account="${account_name:-$account_email}" ;;
+    *)    account="$account_email" ;;
+esac
+account_display=""
+[ -n "$account" ] && account_display="${LIGHT}${account}${RESET}"
+
 # --- Separators ---
 SEP="${DIM} | ${RESET}"
-LIGHT_SEP="${LIGHT} | ${RESET}"  # entre coût et version, aussi clair qu'eux
+LIGHT_SEP="${LIGHT} | ${RESET}"  # entre deux blocs clairs (coût, version, compte), aussi clair qu'eux
+LIGHT_BLOCKS=" cost version account "
 
-# --- Output (single line) ---
-printf '%s' "${BOLD}${BLUE}${cwd_short}${RESET}"
-printf '%s' "${SEP}"
-printf '%s' "${BOLD}${GREEN}${model}${RESET}"
-if [ -n "$effort_display" ]; then
-    printf '%s' " ${effort_display}"
-fi
-printf ' '
-printf '%s' "${pct_display}"
-printf '%s' "${SEP}"
-printf '%s' "${window_display}"
-if [ -n "$session_display" ]; then
-    printf '%s' "${SEP}"
-    printf '%s' "${session_display}"
-fi
-if [ -n "$version_display" ]; then
-    if [ -n "$session_display" ]; then printf '%s' "${LIGHT_SEP}"; else printf '%s' "${SEP}"; fi
-    printf '%s' "${version_display}"
-fi
-printf '\n'
+# --- Output (single line), selon le gabarit ---
+# Un bloc vide (coût inconnu, pas de quota hebdo…) disparaît avec son
+# séparateur ; un nom de bloc inconnu est signalé à sa place.
+declare -A BLOCK=(
+    [dir]="${BOLD}${BLUE}${cwd_short}${RESET}"
+    [model]="${BOLD}${GREEN}${model}${RESET}${effort_display:+ $effort_display}"
+    [context]="$pct_display"
+    [5h]="$five_display"
+    [7d]="$week_display"
+    [cost]="$session_display"
+    [version]="$version_display"
+    [account]="$account_display"
+)
+line="" prev="" sep=""
+for word in "${layout[@]}"; do
+    if [ "$word" = "|" ]; then sep="|"; continue; fi
+    if [ -n "${BLOCK[$word]+set}" ]; then
+        text="${BLOCK[$word]}"
+    else
+        text=$'\033[33m⚠'"${word//[[:cntrl:]]/}${RESET}"
+    fi
+    [ -n "$text" ] || continue
+    if [ -n "$prev" ]; then
+        if [ -z "$sep" ]; then line+=" "
+        elif [[ "$LIGHT_BLOCKS" == *" $prev "* && "$LIGHT_BLOCKS" == *" $word "* ]]; then line+="$LIGHT_SEP"
+        else line+="$SEP"; fi
+    fi
+    line+="$text"; prev="$word"; sep=""
+done
+printf '%s\n' "$line"

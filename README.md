@@ -3,11 +3,12 @@
 Status line d'une ligne pour [Claude Code](https://code.claude.com/docs/en/statusline),
 écrite en bash. Elle affiche d'un coup d'œil le dossier courant, le modèle et
 son niveau d'effort, le remplissage du contexte, la consommation des quotas
-d'abonnement (fenêtre de 5 h et hebdomadaire), le coût de la session et la
-version de Claude Code.
+d'abonnement (fenêtre de 5 h et hebdomadaire), le coût de la session, la
+version de Claude Code et le compte connecté. Les blocs affichés et leur ordre
+se choisissent par une variable (voir [Composer la ligne](#composer-la-ligne)).
 
 ```
-🛠️  mon-projet | Opus 5.5 high [12%      ] | ❺[████1ₕ07ₘ  ]↓ ❼[█2ⱼ08ₕ    ] | $3.21 | v2.1.300→ 2.1.301
+🛠️  mon-projet | Opus 5.5 high [12%      ] | ❺[████1ₕ07ₘ  ]↓ ❼[█2ⱼ08ₕ    ] | $3.21 | v2.1.300→ 2.1.301 | moi@example.org
 ```
 
 (Aperçu approximatif : les jauges sont dessinées en couleurs 24 bits.)
@@ -23,6 +24,7 @@ version de Claude Code.
 | ❼ quota hebdo    | Même jauge pour la fenêtre de 7 jours, sans flèche (`Sa22ₕ` ↔ `2ⱼ08ₕ`).                                                                                                                                                                                                                                                                                                                         |
 | Coût             | Coût de la session au tarif API (indicatif sous abonnement).                                                                                                                                                                                                                                                                                                                                    |
 | Version          | Version de Claude Code, en jaune suivie de la dernière version publiée si elle est plus récente. Les numéros sont des liens vers le changelog.                                                                                                                                                                                                                                                  |
+| Compte           | Compte claude.ai connecté (e-mail par défaut, voir [Réglages](#réglages)), lu dans la configuration de Claude Code (`.claude.json` du profil, ou de `CLAUDE_CONFIG_DIR`). Absent sans connexion claude.ai.                                                                                                                                                                                      |
 
 Détail de la jauge double :
 
@@ -96,12 +98,45 @@ echo '{"cwd":"'"$PWD"'","model":{"display_name":"Opus"},"effort":{"level":"high"
   | ~/.claude/statusline.sh
 ```
 
+## Composer la ligne
+
+`CLAUDE_STATUSLINE_BLOCKS` choisit les blocs et leur ordre. Chaque mot est un
+bloc, `|` place un séparateur, une espace accole deux blocs. La valeur par
+défaut donne la ligne ci-dessus :
+
+```
+dir | model context | 5h 7d | cost | version | account
+```
+
+| Bloc      | Contenu                    |
+|-----------|----------------------------|
+| `dir`     | dossier courant            |
+| `model`   | modèle et niveau d'effort  |
+| `context` | jauge de contexte          |
+| `5h`      | quota ❺ de 5 h             |
+| `7d`      | quota ❼ hebdomadaire       |
+| `cost`    | coût de la session         |
+| `version` | version de Claude Code     |
+| `account` | compte connecté            |
+
+Un bloc sans donnée (coût inconnu, pas de quota hebdo…) disparaît avec son
+séparateur. Un nom de bloc inconnu s'affiche précédé de `⚠`. Sans le bloc
+`version`, le script n'interroge jamais npm.
+
+Exemple, une ligne plus courte qui met le compte en tête :
+
+```json
+"command": "CLAUDE_STATUSLINE_BLOCKS='account | model context | 5h 7d' ~/.claude/statusline.sh"
+```
+
 ## Réglages
 
-Tous facultatifs, par variables d'environnement :
+Tous facultatifs, dans un fichier de réglages ou par variables d'environnement :
 
 | Variable                          | Effet                                                                                                           |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `CLAUDE_STATUSLINE_BLOCKS`        | Blocs affichés et leur ordre (voir [Composer la ligne](#composer-la-ligne)).                                    |
+| `CLAUDE_STATUSLINE_ACCOUNT`       | Forme du compte : `email` (défaut), `user` (partie avant `@`), `org` (organisation), `name` (nom affiché).      |
 | `CLAUDE_STATUSLINE_PROJECTS_DIRS` | Dossiers de projets séparés par `:`. Dedans, le chemin est affiché relatif, précédé d'une icône.                |
 | `CLAUDE_STATUSLINE_PROJECTS_ICON` | Icône de ces dossiers (défaut `🛠️`).                                                                           |
 | `CLAUDE_STATUSLINE_THEME`         | `light` ou `dark` → palette des couleurs d'effort. Par défaut, le réglage clair/sombre de GNOME, sinon `light`. |
@@ -109,7 +144,31 @@ Tous facultatifs, par variables d'environnement :
 Le script tourne sans terminal attaché et ne peut pas connaître le fond du
 terminal → `CLAUDE_STATUSLINE_THEME` sert à l'indiquer hors de GNOME.
 
-La façon la plus simple de les passer est de les poser dans la commande :
+### Fichier de réglages
+
+`~/.config/claude-statusline/config` (ou sous `$XDG_CONFIG_HOME`), une ligne par
+réglage :
+
+```sh
+# Réglages de la status line
+CLAUDE_STATUSLINE_BLOCKS='dir | model context | 5h 7d | account'
+CLAUDE_STATUSLINE_ACCOUNT=org
+CLAUDE_STATUSLINE_PROJECTS_DIRS=~/projets:/storage/projets
+CLAUDE_STATUSLINE_THEME=dark
+```
+
+- les guillemets autour de la valeur sont facultatifs
+- `~` et `$HOME` sont compris en tête des dossiers de projets
+- les lignes vides, les commentaires `#` et les noms inconnus sont ignorés
+- si un réglage apparaît deux fois, la dernière ligne l'emporte
+
+Le fichier est lu comme une liste de valeurs, jamais exécuté par le shell → rien
+d'autre que ces réglages ne peut y être interprété.
+
+### Variables d'environnement
+
+Une variable d'environnement définie, même vide, l'emporte sur le fichier. On
+peut les poser dans la commande :
 
 ```json
 "command": "CLAUDE_STATUSLINE_PROJECTS_DIRS=$HOME/projets CLAUDE_STATUSLINE_THEME=dark ~/.claude/statusline.sh"
