@@ -123,8 +123,8 @@ Elles peuvent aussi être exportées dans le shell qui lance `claude`.
   relevé des quotas, partagé entre sessions. Chaque session ne reçoit les quotas
   qu'à ses propres réponses API, le fichier évite qu'une session inactive
   affiche un quota figé pendant qu'une autre consomme.
-- `/tmp/claude-statusline-ver-<uid>` → dernière version publiée de Claude Code,
-  mise en cache une heure.
+- `~/.cache/claude-statusline/latest-version` → dernière version publiée de
+  Claude Code, mise en cache une heure.
 
 ## Produire une archive
 

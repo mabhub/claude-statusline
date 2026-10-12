@@ -337,14 +337,20 @@ week_pct="${RL_PCT[seven_day]:-}"; week_reset_s="${RL_RESET[seven_day]:-}"
 # --- Coût de la session en tarif API (indicatif sous abonnement) ---
 cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
 
-# --- Latest version (cached 1h) ---
-VER_CACHE="/tmp/claude-statusline-ver-$UID"
+# --- Dernière version publiée (cache d'une heure) ---
+# Dans le cache de l'utilisateur, pas dans /tmp où un autre compte pourrait créer
+# le fichier à l'avance.
+VER_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/latest-version"
 if [ ! -f "$VER_CACHE" ] || [ $(( $(date +%s) - $(stat -c %Y "$VER_CACHE" 2>/dev/null || echo 0) )) -gt 3600 ]; then
-    npm view @anthropic-ai/claude-code version 2>/dev/null >"$VER_CACHE.tmp" \
-        && mv "$VER_CACHE.tmp" "$VER_CACHE"
+    if mkdir -p "${VER_CACHE%/*}" 2>/dev/null && ver_tmp=$(mktemp "$VER_CACHE.XXXXXX" 2>/dev/null); then
+        npm view @anthropic-ai/claude-code version 2>/dev/null >"$ver_tmp" \
+            && mv -f "$ver_tmp" "$VER_CACHE" || rm -f "$ver_tmp"
+    fi
 fi
 latest_ver=""
 [ -f "$VER_CACHE" ] && latest_ver=$(tr -d '[:space:]' <"$VER_CACHE")
+# Affichée telle quelle dans le terminal : rien d'autre qu'un numéro de version.
+[[ "$latest_ver" =~ ^[0-9]+(\.[0-9]+)*$ ]] || latest_ver=""
 
 changelog_link() {
     local ver="$1" anchor
