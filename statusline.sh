@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code status line, sur une seule ligne (par défaut) :
-#   dossier courant | modèle effort jauge de contexte | ❺ quota 5h ❼ quota hebdo | coût | version | compte
+#   dossier courant | modèle effort jauge de contexte ◷ cache | ❺ quota 5h ❼ quota hebdo | coût | version | compte
 #
 # Prérequis : bash ≥ 5, jq, coreutils GNU (stat -c, timeout) ; npm (facultatif,
 # pour signaler une version plus récente de Claude Code).
@@ -8,9 +8,9 @@
 # Réglages facultatifs, par variables d'environnement ou dans le fichier
 # ${XDG_CONFIG_HOME:-~/.config}/claude-statusline/config (voir plus bas) :
 #   CLAUDE_STATUSLINE_BLOCKS        blocs affichés, dans l'ordre : dir model context
-#                                    5h 7d cost version account ; « | » place un
+#                                    cache 5h 7d cost version account ; « | » place un
 #                                    séparateur, l'espace accole deux blocs (défaut :
-#                                    « dir | model context | 5h 7d | cost | version | account »)
+#                                    « dir | model context cache | 5h 7d | cost | version | account »)
 #   CLAUDE_STATUSLINE_ACCOUNT        email | user | org | name : forme du compte connecté
 #                                    (e-mail, sa partie avant @, organisation, nom ;
 #                                    défaut email)
@@ -73,6 +73,10 @@ fi
     IFS= read -r five_reset_s
     IFS= read -r week_pct
     IFS= read -r week_reset_s
+    # Cache de prompt de la conversation : fin du TTL (epoch s) et TTL (« 5m », « 1h »),
+    # absents avant la première réponse API ; expires_at reste renseigné une fois froid.
+    IFS= read -r cache_expires_s
+    IFS= read -r cache_ttl
 } < <(jq -r '
     def num(f): if type == "number" then f else "" end;
     .cwd // "",
@@ -87,7 +91,9 @@ fi
     (.rate_limits.five_hour.used_percentage | num(round)),
     (.rate_limits.five_hour.resets_at | num(floor)),
     (.rate_limits.seven_day.used_percentage | num(round)),
-    (.rate_limits.seven_day.resets_at | num(floor))
+    (.rate_limits.seven_day.resets_at | num(floor)),
+    (.prompt_cache.expires_at | num(floor)),
+    .prompt_cache.ttl // ""
 ' <<<"$input")
 now_s=$EPOCHSECONDS
 
@@ -106,7 +112,7 @@ now_s=$EPOCHSECONDS
 
 # --- Gabarit : blocs affichés et séparateurs, dans l'ordre ---
 # « | » est un mot à part entière, même collé à ses voisins (« dir|model »).
-layout="${CLAUDE_STATUSLINE_BLOCKS:-dir | model context | 5h 7d | cost | version | account}"
+layout="${CLAUDE_STATUSLINE_BLOCKS:-dir | model context cache | 5h 7d | cost | version | account}"
 read -ra layout <<<"${layout//|/ | }"
 
 # --- Dossier courant : ~ pour le home, icône pour les dossiers de projets ---
@@ -146,6 +152,10 @@ QUOTA_THRESHOLDS=( 75          81          86           91          95          
 # > 200K pèsent l'essentiel du coût (rouge au-delà), un tour > 400K coûte ~3 fois
 # un tour à 100-200K (violet au-delà).
 CTX_THRESHOLDS=(   60          90          120          150         175         200        300         400)
+# Bloc cache : même palette, seuils en MINUTES depuis la dernière réponse pour un
+# TTL d'1 h (ramenés au TTL réel). Rouge pendant les 10 dernières minutes, violet
+# une fois le cache froid (la reprise réécrit tout le contexte) ; pas de cramoisi.
+CACHE_THRESHOLDS=( 10          20          30           40          45          50         60          60)
 TRACK=$'\033[48;5;250m'           # fond gris clair = piste des jauges
 TRACK_RGB="188;188;188"           # même gris (250) en RGB
 ELAPSED_RGB="148;148;148"         # gris plus foncé (246) : temps écoulé sans consommation
@@ -570,6 +580,41 @@ if [ -n "$week_pct" ]; then
     week_display="${DIM}❼${RESET}$(window_block "$week_pct" "$week_reset_s" 7d)"
 fi
 
+# --- Cache de prompt : temps écoulé depuis la dernière réponse ---
+# Dernière réponse = expires_at - TTL (le TTL repart à chaque requête). Froid dès
+# maintenant >= expires_at, sans attendre le champ `warm` du prochain rafraîchissement.
+# Texte coloré (sans fond), le temps écoulé arrondi en dessous :
+# « 42ₛ », « 12ₘ », « 1ₕ23ₘ », « 2ⱼ05ₕ ».
+cache_display=""
+ttl_s=""
+if [[ "$cache_ttl" =~ ^([0-9]+)([smh])$ ]]; then
+    case "${BASH_REMATCH[2]}" in
+        s) ttl_s=${BASH_REMATCH[1]} ;;
+        m) ttl_s=$(( BASH_REMATCH[1] * 60 )) ;;
+        h) ttl_s=$(( BASH_REMATCH[1] * 3600 )) ;;
+    esac
+fi
+if [ -n "$cache_expires_s" ] && (( ttl_s > 0 )); then
+    since_s=$(( now_s - (cache_expires_s - ttl_s) ))
+    (( since_s < 0 )) && since_s=0
+    lv=8
+    if (( now_s < cache_expires_s )); then
+        # Minutes ramenées à un TTL d'1 h, plafonnées : encore chaud = pas violet.
+        since_m=$(( since_s * 60 / ttl_s )); (( since_m > 59 )) && since_m=59
+        lv=0
+        for t in "${CACHE_THRESHOLDS[@]}"; do
+            (( since_m < t )) && break
+            lv=$(( lv + 1 ))
+        done
+    fi
+    if (( since_s < 60 )); then since_text="${since_s}ₛ"
+    elif (( since_s < 3600 )); then since_text="$(( since_s / 60 ))ₘ"
+    elif (( since_s < 86400 )); then printf -v since_text '%dₕ%02dₘ' $(( since_s / 3600 )) $(( since_s % 3600 / 60 ))
+    else printf -v since_text '%dⱼ%02dₕ' $(( since_s / 86400 )) $(( since_s % 86400 / 3600 ))
+    fi
+    cache_display="${DIM}◷${RESET} "$'\033[38;2;'"${QUOTA_COLORS[lv]}m${since_text}${RESET}"
+fi
+
 # --- Coût API ---
 session_display=""
 if [ -n "$cost_usd" ]; then
@@ -598,6 +643,7 @@ declare -A BLOCK=(
     [dir]="${BOLD}${BLUE}${cwd_short}${RESET}"
     [model]="${BOLD}${GREEN}${model}${RESET}${effort_display:+ $effort_display}"
     [context]="$pct_display"
+    [cache]="$cache_display"
     [5h]="$five_display"
     [7d]="$week_display"
     [cost]="$session_display"

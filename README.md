@@ -20,6 +20,7 @@ se choisissent par une variable (voir [Composer la ligne](#composer-la-ligne)).
 | Dossier          | Chemin courant, `~` pour le home. Les dossiers de projets peuvent être remplacés par une icône (voir [Réglages](#réglages)).                                                                                                                                                                                                                                                                    |
 | Modèle et effort | Nom du modèle, puis le niveau d'effort coloré comme dans le sélecteur `/effort` de Claude Code.                                                                                                                                                                                                                                                                                                 |
 | Contexte         | Jauge de 10 caractères portant le % de remplissage. La couleur dépend de la **taille** du contexte en tokens, pas du % : vert jusqu'à 120K, jaune/ambre jusqu'à 175K, orange jusqu'à 200K (moment de faire `/compact`), rouge au-delà, violet après 400K.                                                                                                                                       |
+| ◷ cache          | Temps écoulé depuis la dernière réponse : la conversation est-elle encore dans le cache de prompt d'Anthropic (TTL d'1 h ou de 5 min) ? Vert la première demi-heure, puis jaune → orange, rouge les 10 dernières minutes, violet une fois froid (le tour suivant relit tout le contexte au prix fort). Seuils ramenés au TTL réel.                                                              |
 | ❺ quota 5 h      | Jauge double : quota consommé et temps écoulé dans la fenêtre, dans les mêmes cases. La couleur et la flèche (↓ ↘ → ↗ ↑ ↟) donnent la projection du quota en fin de fenêtre au rythme actuel → vert = large marge, orange = pile à 100 %, rouge/violet = quota épuisé avant la fin. Le texte dans la jauge alterne toutes les 5 s entre l'heure de fin (`14:05`) et le temps restant (`1ₕ07ₘ`). |
 | ❼ quota hebdo    | Même jauge pour la fenêtre de 7 jours, sans flèche (`Sa22ₕ` ↔ `2ⱼ08ₕ`).                                                                                                                                                                                                                                                                                                                         |
 | Coût             | Coût de la session au tarif API (indicatif sous abonnement).                                                                                                                                                                                                                                                                                                                                    |
@@ -78,7 +79,8 @@ première réponse de l'API dans la session.
    ```
 
    `refreshInterval` relance le script toutes les 5 s, ce qui fait avancer les
-   jauges de temps et alterner les textes même quand la session est inactive.
+   jauges de temps, le temps écoulé du bloc cache et alterner les textes même
+   quand la session est inactive.
    Sans lui, l'affichage n'est rafraîchi qu'à chaque message.
 
    Ou en une commande, avec `jq` (écriture atomique, les autres réglages sont
@@ -105,7 +107,7 @@ bloc, `|` place un séparateur, une espace accole deux blocs. La valeur par
 défaut donne la ligne ci-dessus :
 
 ```
-dir | model context | 5h 7d | cost | version | account
+dir | model context cache | 5h 7d | cost | version | account
 ```
 
 | Bloc      | Contenu                    |
@@ -113,6 +115,7 @@ dir | model context | 5h 7d | cost | version | account
 | `dir`     | dossier courant            |
 | `model`   | modèle et niveau d'effort  |
 | `context` | jauge de contexte          |
+| `cache`   | état du cache de prompt    |
 | `5h`      | quota ❺ de 5 h             |
 | `7d`      | quota ❼ hebdomadaire       |
 | `cost`    | coût de la session         |
